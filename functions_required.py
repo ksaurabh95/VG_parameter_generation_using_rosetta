@@ -7,6 +7,7 @@ Created on Fri Jul 25 14:21:56 2025
 
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from rosetta import rosetta, SoilData
 
@@ -116,13 +117,20 @@ class SoilHydraulicModel:
         mean = np.atleast_2d(mean)
         stdev = np.atleast_2d(stdev)
 
-        mean[:,2:6] = pow(10,mean[:,2:6] ) 
-        stdev[:,2:6] = pow(10,stdev[:,2:6] ) 
+        # mean[:,2:6] = pow(10,mean[:,2:6] ) 
+        # stdev[:,2:6] = pow(10,stdev[:,2:6] ) 
 
         self.params_mean_list = mean
         self.params_std_list = stdev
         
-        return self.params_mean_list, self.params_std_list
+        param_names = ['thetar', 'thetas', 'log10(alpha) (1/cm)', 'log10(n)', 'log10(Ksat) (cm/day)']
+   
+        self.df_mean = pd.DataFrame(mean, columns=param_names)
+        self.df_std = pd.DataFrame(stdev, columns=param_names)
+       
+        
+        
+        return self.df_mean, self.df_std
     
     
     
@@ -144,7 +152,11 @@ class SoilHydraulicModel:
 
 
         for i in range(len(depth)):
-            thetar, thetas, alpha,n, Ksat = mean[i,:]
+            thetar, thetas, log10_alpha,log10_n, log10_Ksat = mean[i,:]
+            alpha = pow(10,log10_alpha)
+            n = pow(10,log10_n)
+            Ksat = pow(10,log10_Ksat)
+
             # θ(h)
             theta = Van_Genuchten_moisture(h, thetar, thetas, alpha, n)
             # K(h)
@@ -186,25 +198,24 @@ class SoilHydraulicModel:
     def _monte_carlo_samples(self, h,mean ,stdev,N=1000):
         # monte carlo analysis will be performed for each soil layer 1000 times 
         
-        thetar_mean, thetas_mean, alpha_mean,n_mean, Ksat_mean = mean
-        thetar_std, thetas_std, alpha_std,n_std, Ksat_std = stdev
+        samples = np.random.normal(loc=mean, scale=stdev, size=(N, 5))
 
-        
+        thetar_mean, thetas_mean, log10_alpha_mean,log10_n_mean, log10_Ksat_mean = mean
+        alpha_mean = pow(10,log10_alpha_mean )
+        n_mean = pow(10,log10_n_mean )
+        Ksat_mean = pow(10, log10_Ksat_mean)
+        # θ(h) mean
+        theta_mean  = Van_Genuchten_moisture(h, thetar_mean , thetas_mean , alpha_mean , n_mean )
+        # K(h) mean
+        K_mean  =  Van_Genuchten_K(h, Ksat_mean , alpha_mean , n_mean )
+               
         theta_samples, K_samples = [], []
         
         for j in range(N):
-            thetar = np.random.normal(thetar_mean, thetar_std) 
-            thetas = np.random.normal(thetas_mean, thetas_std)
-            alpha = np.random.normal(alpha_mean, alpha_std)
-            n = np.random.normal(n_mean, n_std)
-            Ksat = np.random.normal(Ksat_mean, Ksat_std) 
-            
-            # Apply physical constraints
-            thetar = np.clip(thetar, 0.0, 0.2)
-            thetas = np.clip(thetas, thetar + 0.01, 0.6)  # ensure thetas > thetar
-            alpha  = np.clip(alpha, 1e-5, 1.0)
-            n      = np.clip(n, 1.01, 3.0)
-            Ksat   = np.clip(Ksat, 1e-4, 1e4)  # depending on your application
+            thetar, thetas, log10_alpha,log10_n, log10_Ksat = samples[j,:]
+            alpha = pow(10,log10_alpha )
+            n = pow(10,log10_n )
+            Ksat = pow(10, log10_Ksat)
             theta = Van_Genuchten_moisture(h, thetar, thetas, alpha, n)
             # K(h)
             K =  Van_Genuchten_K(h, Ksat, alpha, n)
@@ -215,7 +226,7 @@ class SoilHydraulicModel:
         theta_samples = np.array(theta_samples) 
         K_samples = np.array(K_samples)
         
-        return theta_samples,K_samples
+        return theta_mean,theta_samples,K_mean,K_samples
     
         
     
@@ -234,18 +245,16 @@ class SoilHydraulicModel:
         stdev = np.atleast_2d(stdev)
         # HCC and SWRC curve will be plotted here 
         layers = len(depth) 
-        fig, axs = plt.subplots( layers,3,figsize=(8*layers,5))
+        fig, axs = plt.subplots( layers,3,figsize=(10*layers,6))
         if layers == 1:
             axs = axs.reshape(1, -1)  # force to 2D shape (1, 3)
         for i in range(len(depth)):
 
-            theta_samples, K_samples = self._monte_carlo_samples(h, mean[i,:],  stdev[i,:] ) 
+            theta_mean,theta_samples,K_mean,K_samples = self._monte_carlo_samples(h, mean[i,:],  stdev[i,:] ) 
             
-            theta_mean = np.mean(theta_samples, axis=0)
             theta_lower = np.percentile(theta_samples, lower_ci, axis=0)
             theta_upper = np.percentile(theta_samples, upper_ci, axis=0)       
             
-            K_mean = np.mean(K_samples, axis=0)
             K_lower = np.percentile(K_samples, lower_ci, axis=0)
             K_upper = np.percentile(K_samples, upper_ci, axis=0)
             
