@@ -28,7 +28,7 @@ textural_data =  [  [sand,silt,clay],[sand,silt,clay] ]
 model = SoilHydraulicModel(textural_data,depth,CI)
 print(model.textures)  # ['sandy loam', 'loam', 'clay loam']
 mean_params, std_params = model.get_parameters()  # mean and standard deviation of vg parameters
-# model.plot_mean_SWRC_HCC_curve() 
+model.plot_mean_SWRC_HCC_curve() 
 model.plot_SWRC_HCC_with_confidence_band() 
 
  
