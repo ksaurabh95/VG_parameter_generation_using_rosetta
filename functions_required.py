@@ -59,7 +59,8 @@ def Van_Genuchten_moisture(h, thetar, thetas, alpha, N):
     theta_unsat = thetar + (thetas - thetar) * np.power(1 + beta, -m)
 
     # Saturated condition where h > 0
-    theta = np.where(h >= 0, theta_unsat, thetas)
+    # theta = np.where(h >= 0, theta_unsat, thetas)
+    theta = theta_unsat 
 
     return theta
 
@@ -119,18 +120,56 @@ class SoilHydraulicModel:
 
         # mean[:,2:6] = pow(10,mean[:,2:6] ) 
         # stdev[:,2:6] = pow(10,stdev[:,2:6] ) 
-
+   
         self.params_mean_list = mean
         self.params_std_list = stdev
         
         param_names = ['thetar', 'thetas', 'log10(alpha) (1/cm)', 'log10(n)', 'log10(Ksat) (cm/day)']
-   
+        
+        # parameters = [mean, wilting_point, field_capacity ]
         self.df_mean = pd.DataFrame(mean, columns=param_names)
         self.df_std = pd.DataFrame(stdev, columns=param_names)
-       
-        
         
         return self.df_mean, self.df_std
+    
+    def wilting_point_and_field_calacity(self):
+        # wilting point and field capacity is estimated when pressure head is 330 cm and 15000 cm respectively
+        h_wp = -15000 # pressure head value in cm at permanent wilting point 
+        h_fc = -300  # pressure head value in cm at field capacity point
+        
+        mean = self.params_mean_list
+        depth = self.depth
+        mean = np.atleast_2d(mean)
+        wilting_point, field_capacity = [], []
+        
+        
+        for i in range(len(depth)):
+            thetar, thetas, log10_alpha,log10_n, log10_Ksat = mean[i,:]
+            alpha = pow(10,log10_alpha)
+            n = pow(10,log10_n)
+            # θ(h)
+            theta_wp = Van_Genuchten_moisture(h_wp, thetar, thetas, alpha, n)
+            theta_fc = Van_Genuchten_moisture(h_fc, thetar, thetas, alpha, n)
+            
+            wilting_point.append(theta_wp)
+            field_capacity.append(theta_fc)
+        
+        # param_names = ['wilting_point', 'field capacity']
+        # pramas = [wilting_point,field_capacity]    
+        wilting_point = np.array(wilting_point)
+        field_capacity = np.array(field_capacity)
+        param_names = ['wilting_point', 'field capacity']
+        pramas = np.array([wilting_point,field_capacity] ) 
+        pramas = pramas.transpose()
+        
+        self.wp_fc = pd.DataFrame(pramas, columns=param_names)
+        
+        # self.wilting_point = pd.DataFrame(wilting_point, columns='wilting_point')
+        # self.field_capacity = pd.DataFrame(field_capacity, columns='field_capacity')
+
+        
+         
+        return self.wp_fc 
     
     
     
@@ -141,11 +180,18 @@ class SoilHydraulicModel:
         mean = self.params_mean_list
         depth = self.depth
         mean = np.atleast_2d(mean)
+        texture = self.textures
 
 
         # HCC and SWRC curve will be plotted here 
         layers = len(depth) 
-        fig, axs = plt.subplots( layers,3,figsize=(8*layers,5))
+        base_width=5
+        base_height=4
+        width = base_width * 3
+        height = base_height * layers
+        fig, axs = plt.subplots( layers,3,figsize=(width, height), squeeze=False)
+        # fig, axs = plt.subplots( layers,3,figsize=(8*layers,5))
+
         # Fix for subplot axis layout
         if layers == 1:
             axs = axs.reshape(1, -1)  # force to 2D shape (1, 3)
@@ -166,8 +212,7 @@ class SoilHydraulicModel:
             axs[i,0].set_xscale('log')
             axs[i,0].set_xlabel('|h| (cm)')
             axs[i,0].set_ylabel(r'$\theta$')
-            axs[i,0].set_title(r'$\theta$ vs |h| at depth')
-            axs[i,0].set_title(f'θ(h) vs |h| Depth: {depth[i]} cm') 
+            axs[i,0].set_title(f'θ(h) vs |h| Depth: {depth[i]} cm for {texture[i]} soil') 
             axs[i,0].set_ylim([0,1])
             axs[i,0].set_xlim([1,10**5])
             axs[i,0].grid(True)
@@ -177,7 +222,7 @@ class SoilHydraulicModel:
             axs[i,1].set_xscale('log')
             axs[i,1].set_xlabel('|h| (cm)')
             axs[i,1].set_ylabel(r'$K$ $(cm/day)$')
-            axs[i,1].set_title(f'K(h) vs |h| Depth: {depth[i]} cm') 
+            axs[i,1].set_title(f'K(h) vs |h| Depth: {depth[i]} cm for {texture[i]} soil') 
             axs[i,1].set_xlim([1,10**5])
             axs[i,1].set_ylim([0,np.round(Ksat)])
 
@@ -186,7 +231,7 @@ class SoilHydraulicModel:
             axs[i,2].plot(theta,K)
             axs[i,2].set_xlabel(r'$\theta$')
             axs[i,2].set_ylabel(r'$K$ $(cm/day)$')
-            axs[i,2].set_title(f'K(h) vs θ(h) Depth: {depth[i]} cm') 
+            axs[i,2].set_title(f'K(h) vs θ(h) Depth: {depth[i]} cm for {texture[i]} soil') 
             axs[i,2].set_xlim([0,1])
             axs[i,2].set_ylim([0,np.round(Ksat)])
 
@@ -241,11 +286,18 @@ class SoilHydraulicModel:
         mean = self.params_mean_list
         stdev = self.params_std_list
         depth = self.depth
+        texture = self.textures
+
         mean = np.atleast_2d(mean)
         stdev = np.atleast_2d(stdev)
         # HCC and SWRC curve will be plotted here 
         layers = len(depth) 
-        fig, axs = plt.subplots( layers,3,figsize=(10*layers,6))
+        base_width=5
+        base_height=4
+        width = base_width * 3
+        height = base_height * layers
+        fig, axs = plt.subplots( layers,3,figsize=(width, height), squeeze=False)
+        
         if layers == 1:
             axs = axs.reshape(1, -1)  # force to 2D shape (1, 3)
         for i in range(len(depth)):
@@ -265,7 +317,7 @@ class SoilHydraulicModel:
             axs[i,0].set_xlabel('|h| (cm)')
             axs[i,0].set_ylabel(r'$\theta$')
             axs[i,0].set_title(r'$\theta$ vs |h| at depth')
-            axs[i,0].set_title(f'θ(h) vs |h| Depth: {depth[i]} cm') 
+            axs[i,0].set_title(f'θ(h) vs |h| Depth: {depth[i]} cm for {texture[i]} soil') 
             axs[i,0].set_ylim([0,1])
             axs[i,0].set_xlim([1,10**5])
             axs[i,0].grid(True)
@@ -276,7 +328,7 @@ class SoilHydraulicModel:
             axs[i,1].set_xscale('log')
             axs[i,1].set_xlabel('|h| (cm)')
             axs[i,1].set_ylabel(r'$K$ $(cm/day)$')
-            axs[i,1].set_title(f'K(h) vs |h| Depth: {depth[i]} cm') 
+            axs[i,1].set_title(f'K(h) vs |h| Depth: {depth[i]} cm for {texture[i]} soil') 
             axs[i,1].set_xlim([1,10**5])
 
             axs[i,1].grid(True)
@@ -286,7 +338,7 @@ class SoilHydraulicModel:
 
             axs[i,2].set_xlabel(r'$\theta$')
             axs[i,2].set_ylabel(r'$K$ $(cm/day)$')
-            axs[i,2].set_title(f'K(h) vs θ(h) Depth: {depth[i]} cm') 
+            axs[i,2].set_title(f'K(h) vs θ(h) Depth: {depth[i]} cm for {texture[i]} soil') 
             axs[i,2].set_xlim([0,1])
 
             axs[i,2].grid(True)
